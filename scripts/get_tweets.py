@@ -17,6 +17,7 @@ class TweetRetriever:
         self.api = self.setup_api()
 
     def setup_api(self):
+        # TODO: change configparser to dotenv
         auth = tweepy.OAuthHandler(self.config["KEYS"]["CONSUMER_KEY"], self.config["KEYS"]["CONSUMER_SECRET"])
         auth.set_access_token(self.config["KEYS"]["OAUTH_TOKEN"], self.config["KEYS"]["OAUTH_TOKEN_SECRET"])
         return tweepy.API(auth, wait_on_rate_limit=True)
