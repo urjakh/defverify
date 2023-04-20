@@ -12,16 +12,23 @@ DATASET_SPLITS = ["train", "validation", "test"]
 TOKENIZE_COLUMNS = ["input_ids", "attention_mask", "labels"]
 
 
+def load_data(name, folder):
+    dataset = load_dataset("csv", data_files="../data/davidson/labeled_data.csv")
+
+    return
+
+
+
 def get_dataset(
         task: str,
         model: str,
+        max_length: int = 256,
         sub_task: str = None,
         tokenize: bool = False,
         split: str = None,
         padding: bool = False,
         batched: bool = False,
         return_tokenizer: bool = False,
-        dataset_directory: str = None,
 ) -> Union[Callable, Tuple[Callable, Callable]]:
     """Function that returns a dataset and possibly a tokenizer.
 
@@ -33,6 +40,7 @@ def get_dataset(
     Args:
         task (str): Task name that specified which dataset should be loaded (e.g. "glue").
         model (str): Name of the model that will be used in training (e.g. "albert-large-v2").
+        max_length (int): Maximum length of tokens for the model.
         sub_task (str): Sub-task name of the dataset if applicable (e.g. in case of "glue"; "sst2").
         tokenize (bool): Boolean that indicates if tokenization should take place or not.
         split (str): Specifies if a specific split of the dataset should only be returned.
@@ -45,8 +53,9 @@ def get_dataset(
         tokenizer (Tokenizer, optional): Tokenizer that is/was used for tokenizing the dataset.
 
     """
-    if dataset_directory:
-        dataset = load_from_disk(dataset_directory)
+
+    load_data(name)
+
     elif sub_task:
         dataset = load_dataset(task, sub_task)
     else:
