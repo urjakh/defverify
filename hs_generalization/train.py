@@ -297,15 +297,14 @@ def main(config_path):
 
     # Get values from config.
     model_name = config["task"]["model_name"]
-    task_name = config["task"]["task_name"]
-    sub_task_name = config["task"]["sub_task_name"]
+    dataset_name = config["task"]["dataset_name"]
     device = config["pipeline"]["device"]
     dataset_directory = config["task"].get("dataset_directory")
     padding = config["processing"]["padding"]
 
     # Load dataset and dataloaders.
     dataset, tokenizer = get_dataset(
-        task_name,
+        dataset_name,
         model_name,
         padding=padding,
         tokenize=True,
