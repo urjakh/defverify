@@ -27,7 +27,7 @@ import torch
 import wandb
 from datasets import load_metric, Metric
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import _LRScheduler, CyclicLR
+from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AdamW
@@ -49,29 +49,29 @@ class BestEpoch:
     Attributes:
         best_epoch (int): Integer indicating the best epoch until now.
         best_loss (float): Float indicating the best loss until now.
-        best_accuracy (float): Float indicating the best accuracy until now.
+        best_score (float): Float indicating the best score until now.
 
     """
     def __init__(self):
         """Initialize the tracker of the best epoch."""
         self.best_epoch: int = 0
         self.best_loss: float = float("inf")
-        self.best_accuracy: float = 0.0
+        self.best_score: float = 0.0
 
-    def update(self, current_loss: float, current_accuracy: float, epoch: int) -> None:
+    def update(self, current_loss: float, current_score: float, epoch: int) -> None:
         """Updates the best epoch tracker.
 
-        Takes the evaluation loss and accuracy of the current epoch and compares it with the current best loss.
-        If it is lower, updates the current loss, accuracy, and epoch to be the best until now.
+        Takes the evaluation loss and score of the current epoch and compares it with the current best loss.
+        If it is lower, updates the current loss, score, and epoch to be the best until now.
 
         Args:
             current_loss (float): loss of the current epoch.
-            current_accuracy (float): accuracy of the current epoch.
+            current_score (float): score of the current epoch.
             epoch (int): which epoch.
         """
         if current_loss < self.best_loss:
             self.best_loss = current_loss
-            self.best_accuracy = current_accuracy
+            self.best_score = current_score
             self.best_epoch = epoch
 
 
@@ -190,9 +190,9 @@ def train(
         predictions = outputs.logits.argmax(dim=-1)
         metric.add_batch(predictions=predictions, references=batch["labels"])
 
-        accuracy = metric.compute()["accuracy"]
-        metrics = {"train_accuracy": accuracy}
-        scores.append(accuracy)
+        score = metric.compute()[metric.name]
+        metrics = {f"train_{metric.name}": score}
+        scores.append(score)
 
         current_step = (epoch * len(dataloader)) + step
         log_dict = {"epoch": epoch, "train_loss": loss, **metrics, "learning_rate": current_lr}
@@ -201,7 +201,7 @@ def train(
         losses.append(loss.detach().cpu().numpy())
 
         if step % logging_freq == 0:
-            logger.info(f" Epoch {epoch}, Step {step}: Loss: {loss}, Accuracy: {accuracy}")
+            logger.info(f" Epoch {epoch}, Step {step}: Loss: {loss}, Score: {score}")
 
         if current_step == max_steps - 1:
             break
@@ -209,8 +209,8 @@ def train(
     average_loss = np.mean(losses)
     average_score = np.mean(scores)
 
-    metrics = {"average_train_accuracy": average_score}
-    logger.info(f" Epoch {epoch} average training loss: {average_loss}, accuracy: {average_score}")
+    metrics = {f"average_train_{metric.name}": average_score}
+    logger.info(f" Epoch {epoch} average training loss: {average_loss}, {metric.name}: {average_score}")
 
     wandb.log({"average_train_loss": average_loss, **metrics})
 
@@ -226,7 +226,7 @@ def validate(
     """Function that performs all the steps during the validation/evaluation phase.
 
     In this function, the entire evaluation phase of an epoch is run. Looping over the dataloader, each batch is fed
-    to the model and the loss and accuracy are tracked.
+    to the model and the loss and score are tracked.
 
     Args:
         model (Model): Model that is being trained.:
@@ -238,7 +238,7 @@ def validate(
 
     Returns:
         eval_loss (float): Average loss over the whole validation set.
-        eval_accuracy (float): Average accuracy over the whole validation set.
+        eval_score (float): Average score over the whole validation set.
     """
     model.eval()
 
@@ -266,13 +266,13 @@ def validate(
 
     eval_loss = np.mean(losses)
 
-    eval_accuracy = metric.compute()["accuracy"]
-    logger.info(f" Evaluation {epoch}: Average Loss: {eval_loss}, Average Accuracy: {eval_accuracy}")
-    metrics = {"eval_accuracy": eval_accuracy}
+    eval_score = metric.compute()[metric.name]
+    logger.info(f" Evaluation {epoch}: Average Loss: {eval_loss}, Average {metric.name}: {eval_score}")
+    metrics = {f"eval_{metric.name}": eval_score}
 
     wandb.log({"epoch": epoch, "eval_loss": eval_loss, **metrics})
 
-    return eval_loss, eval_accuracy
+    return eval_loss, eval_score
 
 
 @click.command()
@@ -300,21 +300,21 @@ def main(config_path):
     task_name = config["task"]["task_name"]
     sub_task_name = config["task"]["sub_task_name"]
     device = config["pipeline"]["device"]
+    dataset_directory = config["task"].get("dataset_directory")
+    padding = config["processing"]["padding"]
 
     # Load dataset and dataloaders.
     dataset, tokenizer = get_dataset(
         task_name,
         model_name,
-        sub_task=sub_task_name,
-        padding=config["processing"]["padding"],
+        padding=padding,
         tokenize=True,
         batched=True,
         return_tokenizer=True,
-        dataset_directory=config["task"].get("dataset_directory")
+        dataset_directory=dataset_directory,
     )
     train_dataset = dataset["train"]
     validation_dataset = dataset["validation"]
-    padding = config["processing"]["padding"]
     train_batch_size = config["pipeline"]["train_batch_size"]
     validation_batch_size = config["pipeline"]["validation_batch_size"]
     train_dataloader = get_dataloader(train_dataset, tokenizer, train_batch_size, padding, shuffle=True)
@@ -330,7 +330,7 @@ def main(config_path):
         n_epochs = int(np.ceil(max_train_steps / num_update_steps_per_epoch))
 
     # Load metric, model, optimizer, and learning rate scheduler.
-    metric = load_metric(task_name, sub_task_name)
+    metric = load_metric(config["metric"])
     model = AlbertForSequenceClassification.from_pretrained(model_name)
     optimizer = get_optimizer(model, config["optimizer"]["learning_rate"], config["optimizer"]["weight_decay"])
 
@@ -380,7 +380,7 @@ def main(config_path):
             max_train_steps,
             device,
         )
-        eval_loss, eval_accuracy = validate(
+        eval_loss, eval_score = validate(
             model,
             epoch,
             validation_dataloader,
@@ -394,11 +394,11 @@ def main(config_path):
         save_model(
             model, optimizer, lr_scheduler, epoch, config["pipeline"]["output_directory"], model_name
         )
-        tracker.update(eval_loss, eval_accuracy, epoch)
+        tracker.update(eval_loss, eval_score, epoch)
 
     logger.info(
         f"Best performance was during epoch {tracker.best_epoch}, with a loss of {tracker.best_loss}, "
-        f"and accuracy of {tracker.best_accuracy}"
+        f"and score of {tracker.best_score}"
     )
 
 
