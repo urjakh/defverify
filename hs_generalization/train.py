@@ -30,7 +30,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AdamW
+from transformers import AdamW, RobertaForSequenceClassification
 from transformers import AlbertForSequenceClassification, set_seed, default_data_collator, \
     DataCollatorWithPadding, get_scheduler
 
@@ -190,7 +190,7 @@ def train(
         predictions = outputs.logits.argmax(dim=-1)
         metric.add_batch(predictions=predictions, references=batch["labels"])
 
-        score = metric.compute()[metric.name]
+        score = metric.compute(average=None)[metric.name]
         metrics = {f"train_{metric.name}": score}
         scores.append(score)
 
@@ -266,7 +266,7 @@ def validate(
 
     eval_loss = np.mean(losses)
 
-    eval_score = metric.compute()[metric.name]
+    eval_score = metric.compute(average=None)[metric.name]
     logger.info(f" Evaluation {epoch}: Average Loss: {eval_loss}, Average {metric.name}: {eval_score}")
     metrics = {f"eval_{metric.name}": eval_score}
 
@@ -313,7 +313,7 @@ def main(config_path):
         dataset_directory=dataset_directory,
     )
     train_dataset = dataset["train"]
-    validation_dataset = dataset["validation"]
+    validation_dataset = dataset["val"]
     train_batch_size = config["pipeline"]["train_batch_size"]
     validation_batch_size = config["pipeline"]["validation_batch_size"]
     train_dataloader = get_dataloader(train_dataset, tokenizer, train_batch_size, padding, shuffle=True)
@@ -329,8 +329,8 @@ def main(config_path):
         n_epochs = int(np.ceil(max_train_steps / num_update_steps_per_epoch))
 
     # Load metric, model, optimizer, and learning rate scheduler.
-    metric = load_metric(config["metric"])
-    model = AlbertForSequenceClassification.from_pretrained(model_name)
+    metric = load_metric(config["pipeline"]["metric"])
+    model = RobertaForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
     optimizer = get_optimizer(model, config["optimizer"]["learning_rate"], config["optimizer"]["weight_decay"])
 
     lr_scheduler = get_scheduler(

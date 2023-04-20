@@ -11,6 +11,13 @@ from transformers import AutoTokenizer
 DATASET_SPLITS = ["train", "validation", "test"]
 TOKENIZE_COLUMNS = ["input_ids", "attention_mask", "labels"]
 
+dataset_to_input_output = {
+    "davidson": {
+        "input": "tweet",
+        "output": "class",
+    }
+}
+
 
 def get_dataset(
         dataset_name: str,
@@ -52,11 +59,13 @@ def get_dataset(
     else:
         dataset = load_dataset(dataset_name)
 
+    input_name = dataset_to_input_output[dataset_name]["input"]
+
     tokenizer = AutoTokenizer.from_pretrained(model)
     if tokenize:
         dataset = dataset.map(
             lambda x: tokenizer(
-                x["sentence"],
+                x[input_name],
                 padding=padding,
                 truncation=True,
                 max_length=max_length,
@@ -64,7 +73,13 @@ def get_dataset(
             batched=batched,
         )
 
-    dataset = dataset.rename_column("label", "labels")
+    dataset = dataset.rename_column(dataset_to_input_output[dataset_name]["output"], "labels")
+    cols_to_remove = dataset["train"].column_names
+    print(cols_to_remove)
+    cols_to_remove.remove("input_ids")
+    cols_to_remove.remove("attention_mask")
+    cols_to_remove.remove("labels")
+    dataset.remove_columns(cols_to_remove)
     if tokenize:
         dataset.set_format(type='torch', columns=TOKENIZE_COLUMNS)
 
