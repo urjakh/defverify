@@ -14,8 +14,8 @@ TOKENIZE_COLUMNS = ["input_ids", "attention_mask", "labels"]
 
 def get_dataset(
         dataset_name: str,
-        dataset_directory: str,
         model: str,
+        dataset_directory: str = None,
         max_length: int = 256,
         tokenize: bool = False,
         split: str = None,
