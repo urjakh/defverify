@@ -12,18 +12,11 @@ DATASET_SPLITS = ["train", "validation", "test"]
 TOKENIZE_COLUMNS = ["input_ids", "attention_mask", "labels"]
 
 
-def load_data(name, folder):
-    dataset = load_dataset("csv", data_files="../data/davidson/labeled_data.csv")
-
-    return
-
-
-
 def get_dataset(
-        task: str,
+        dataset_name: str,
+        dataset_directory: str,
         model: str,
         max_length: int = 256,
-        sub_task: str = None,
         tokenize: bool = False,
         split: str = None,
         padding: bool = False,
@@ -54,12 +47,10 @@ def get_dataset(
 
     """
 
-    load_data(name)
-
-    elif sub_task:
-        dataset = load_dataset(task, sub_task)
+    if dataset_directory:
+        dataset = load_from_disk(dataset_directory)
     else:
-        dataset = load_dataset(task)
+        dataset = load_dataset(dataset_name)
 
     tokenizer = AutoTokenizer.from_pretrained(model)
     if tokenize:
@@ -68,6 +59,7 @@ def get_dataset(
                 x["sentence"],
                 padding=padding,
                 truncation=True,
+                max_length=max_length,
             ),
             batched=batched,
         )
