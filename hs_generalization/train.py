@@ -16,16 +16,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import functools
 import logging
 import random
+from collections import defaultdict
 from typing import Callable, Tuple, Any
 
 import click
+import evaluate
 import numpy as np
 import torch
 import wandb
-from datasets import load_metric, Metric
+from evaluate import Metric, CombinedEvaluations
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
@@ -38,6 +40,40 @@ from hs_generalization.utils import get_dataset, load_config, save_model, load_m
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("root")
+
+
+def combine_compute(self, predictions=None, references=None, **kwargs):
+    """Compute each evaluation module.
+
+    Usage of positional arguments is not allowed to prevent mistakes.
+
+    Args:
+        predictions (list/array/tensor, optional): Predictions.
+        references (list/array/tensor, optional): References.
+        **kwargs (optional): Keyword arguments that will be forwarded to the evaluation module :meth:`_compute`
+            method (see details in the docstring).
+
+    Return:
+        dict or None
+
+        - Dictionary with the results if this evaluation module is run on the main process (``process_id == 0``).
+        - None if the evaluation module is not run on the main process (``process_id != 0``).
+    """
+    results = []
+
+    for evaluation_module in self.evaluation_modules:
+        if evaluation_module.name == "rocauc":
+            if "average" in kwargs and kwargs["average"] == "macro":
+                batch = {"prediction_scores": predictions, "references": references}
+            else:
+                continue
+        elif evaluation_module.name == "accuracy":
+            batch = {"predictions": predictions, "references": references}
+        else:
+            batch = {"predictions": predictions, "references": references, **kwargs}
+        results.append(evaluation_module.compute(**batch))
+
+    return self._merge_results(results)
 
 
 class BestEpoch:
@@ -165,7 +201,7 @@ def train(
     model.train()
     logging.info(f" Start training epoch {epoch}")
 
-    scores = []
+    scores = defaultdict(list)
     losses = []
     for step, batch in enumerate(tqdm(dataloader)):
 
@@ -188,11 +224,14 @@ def train(
         current_lr = lr_scheduler.get_last_lr()[0]
 
         predictions = outputs.logits.argmax(dim=-1)
-        metric.add_batch(predictions=predictions, references=batch["labels"])
 
-        score = metric.compute(average=None)[metric.name]
-        metrics = {f"train_{metric.name}": score}
-        scores.append(score)
+        score_micro = metric.compute(predictions=predictions, references=batch["labels"], average="micro")
+        score_macro = metric.compute(predictions=predictions, references=batch["labels"], average="macro")
+        metrics_micro = {f"train_micro_{name}": val for name, val in score_micro.items()}
+        metrics_macro = {f"train_macro_{name}": val for name, val in score_macro.items()}
+        metrics = metrics_micro | metrics_macro
+        for name, val in metrics.items():
+            scores[name].append(val)
 
         current_step = (epoch * len(dataloader)) + step
         log_dict = {"epoch": epoch, "train_loss": loss, **metrics, "learning_rate": current_lr}
@@ -201,16 +240,14 @@ def train(
         losses.append(loss.detach().cpu().numpy())
 
         if step % logging_freq == 0:
-            logger.info(f" Epoch {epoch}, Step {step}: Loss: {loss}, Score: {score}")
+            logger.info(f" Epoch {epoch}, Step {step}: Loss: {loss}, Score: {metrics}")
 
         if current_step == max_steps - 1:
             break
 
     average_loss = np.mean(losses)
-    average_score = np.mean(scores)
-
-    metrics = {f"average_train_{metric.name}": average_score}
-    logger.info(f" Epoch {epoch} average training loss: {average_loss}, {metric.name}: {average_score}")
+    metrics = {f"average_{name}": np.mean(scores[name]) for name in scores}
+    logger.info(f" Epoch {epoch} average training loss: {average_loss}, {metrics}")
 
     wandb.log({"average_train_loss": average_loss, **metrics})
 
@@ -242,6 +279,9 @@ def validate(
     """
     model.eval()
 
+    predictions = torch.tensor([])
+    references = torch.tensor([])
+
     with torch.no_grad():
         logger.info(" Starting Evaluation")
         losses = []
@@ -255,8 +295,8 @@ def validate(
                 print(dataloader.collate_fn.tokenizer.batch_decode(batch["input_ids"])[0])
 
             outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
-            predictions = outputs.logits.argmax(dim=-1)
-            metric.add_batch(predictions=predictions, references=batch["labels"])
+            predictions = torch.cat([predictions, outputs.logits.argmax(dim=-1)])
+            references = torch.cat([references, batch["labels"]])
 
             losses.append(outputs.loss.detach().cpu().numpy())
             current_step = (epoch * len(dataloader)) + step
@@ -265,14 +305,17 @@ def validate(
                 break
 
     eval_loss = np.mean(losses)
+    score_micro = metric.compute(predictions=predictions, references=references, average="micro")
+    score_macro = metric.compute(predictions=predictions, references=references, average="macro")
+    metrics_micro = {f"eval_micro_{name}": val for name, val in score_micro.items()}
+    metrics_macro = {f"eval_macro_{name}": val for name, val in score_macro.items()}
+    metrics = metrics_micro | metrics_macro
 
-    eval_score = metric.compute(average=None)[metric.name]
-    logger.info(f" Evaluation {epoch}: Average Loss: {eval_loss}, Average {metric.name}: {eval_score}")
-    metrics = {f"eval_{metric.name}": eval_score}
+    logger.info(f" Evaluation {epoch}: Average Loss: {eval_loss}, Average metrics: {metrics}")
 
     wandb.log({"epoch": epoch, "eval_loss": eval_loss, **metrics})
 
-    return eval_loss, eval_score
+    return eval_loss, metrics
 
 
 @click.command()
@@ -329,7 +372,9 @@ def main(config_path):
         n_epochs = int(np.ceil(max_train_steps / num_update_steps_per_epoch))
 
     # Load metric, model, optimizer, and learning rate scheduler.
-    metric = load_metric(config["pipeline"]["metric"])
+    metric = evaluate.combine(["accuracy", "f1", "precision", "recall"])
+    # Since evaluate.compute cannot handle extra arguments (e.g. average), override with own function that allows.
+    metric.compute = functools.partial(combine_compute, metric)
     model = RobertaForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
     optimizer = get_optimizer(model, config["optimizer"]["learning_rate"], config["optimizer"]["weight_decay"])
 

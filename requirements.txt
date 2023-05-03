@@ -12,3 +12,4 @@ chardet==5.1.0
 cchardet==2.1.7
 scikit-learn==1.2.2
 seaborn==0.12.2
+evaluate==0.4.0
