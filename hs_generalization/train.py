@@ -28,14 +28,13 @@ import numpy as np
 import torch
 import wandb
 from accelerate import Accelerator
-from evaluate import Metric, CombinedEvaluations
+from evaluate import Metric
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AdamW, RobertaForSequenceClassification
-from transformers import AlbertForSequenceClassification, set_seed, default_data_collator, \
-    DataCollatorWithPadding, get_scheduler
+from transformers import set_seed, default_data_collator, DataCollatorWithPadding, get_scheduler
 
 from hs_generalization.utils import get_dataset, load_config, save_model, load_model
 
