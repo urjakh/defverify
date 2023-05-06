@@ -75,7 +75,6 @@ def get_dataset(
 
     dataset = dataset.rename_column(dataset_to_input_output[dataset_name]["output"], "labels")
     cols_to_remove = dataset["train"].column_names
-    print(cols_to_remove)
     cols_to_remove.remove("input_ids")
     cols_to_remove.remove("attention_mask")
     cols_to_remove.remove("labels")
