@@ -27,6 +27,7 @@ import evaluate
 import numpy as np
 import torch
 import wandb
+from accelerate import Accelerator
 from evaluate import Metric, CombinedEvaluations
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
@@ -67,6 +68,8 @@ def combine_compute(self, predictions=None, references=None, **kwargs):
                 batch = {"prediction_scores": predictions, "references": references}
             else:
                 continue
+        elif evaluation_module.name == "precision" or evaluation_module.name == "recall":
+            batch = {"predictions": predictions, "references": references, "zero_division": 0, **kwargs}
         elif evaluation_module.name == "accuracy":
             batch = {"predictions": predictions, "references": references}
         else:
@@ -180,7 +183,7 @@ def train(
         metric: Metric,
         logging_freq: int,
         max_steps: int,
-        device: str,
+        accelerator: Accelerator,
 ) -> None:
     """Function that performs all the steps during the training phase.
 
@@ -204,24 +207,20 @@ def train(
     scores = defaultdict(list)
     losses = []
     for step, batch in enumerate(tqdm(dataloader)):
+        with accelerator.accumulate(model):
+            if step < 5:
+                print(batch["input_ids"][0])
+                print(dataloader.collate_fn.tokenizer.batch_decode(batch["input_ids"])[0])
 
-        input_ids = batch["input_ids"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)
+            outputs = model(batch["input_ids"], attention_mask=batch["attention_mask"], labels=batch["labels"])
+            loss = outputs.loss
+            accelerator.backward(loss)
 
-        if step < 5:
-            print(batch["input_ids"][0])
-            print(dataloader.collate_fn.tokenizer.batch_decode(batch["input_ids"])[0])
+            optimizer.step()
+            optimizer.zero_grad()
 
-        outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
-        loss = outputs.loss
-        loss.backward()
-
-        optimizer.step()
-        optimizer.zero_grad()
-
-        lr_scheduler.step()
-        current_lr = lr_scheduler.get_last_lr()[0]
+            lr_scheduler.step()
+            current_lr = lr_scheduler.get_last_lr()[0]
 
         predictions = outputs.logits.argmax(dim=-1)
 
@@ -286,17 +285,14 @@ def validate(
         logger.info(" Starting Evaluation")
         losses = []
         for step, batch in enumerate(tqdm(dataloader)):
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            labels = batch["labels"].to(device)
 
             if step < 5:
                 print(batch["input_ids"][0])
                 print(dataloader.collate_fn.tokenizer.batch_decode(batch["input_ids"])[0])
 
-            outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
-            predictions = torch.cat([predictions, outputs.logits.argmax(dim=-1)])
-            references = torch.cat([references, batch["labels"]])
+            outputs = model(batch["input_ids"], attention_mask=batch["attention_mask"], labels=batch["labels"])
+            predictions = torch.cat([predictions, outputs.logits.argmax(dim=-1).to("cpu")])
+            references = torch.cat([references, batch["labels"].to("cpu")])
 
             losses.append(outputs.loss.detach().cpu().numpy())
             current_step = (epoch * len(dataloader)) + step
@@ -338,10 +334,18 @@ def main(config_path):
     set_seed(config["pipeline"]["seed"])
     torch.backends.cudnn.deterministic = True
 
+    # Set Accelerator for device and speedups.
+    # Set PYTORCH_ENABLE_MPS_FALLBACK=1 to make this work on Mac
+    gradient_accumulation_steps = config["optimizer"].get("gradient_accumulation_steps", 1)
+    mixed_precision = config["pipeline"].get("mixed_precision")
+    accelerator = Accelerator(gradient_accumulation_steps=gradient_accumulation_steps, mixed_precision=mixed_precision)
+    device = accelerator.device
+
     # Get values from config.
     model_name = config["task"]["model_name"]
     dataset_name = config["task"]["dataset_name"]
-    device = config["pipeline"]["device"]
+    if "device" in config["pipeline"]:
+        device = config["pipeline"]["device"]
     dataset_directory = config["task"].get("dataset_directory")
     padding = config["processing"]["padding"]
 
@@ -388,7 +392,7 @@ def main(config_path):
     # Set everything correctly according to resumption of training or not.
     start_epoch = 0
     if "resume" in config["pipeline"]:
-        model, optimizer, scheduler, epoch = load_model(config["pipeline"]["resume"], model, optimizer, lr_scheduler)
+        model, optimizer, lr_scheduler, epoch = load_model(config["pipeline"]["resume"], model, optimizer, lr_scheduler)
         # Start from the next epoch.
         start_epoch = epoch + 1
 
@@ -401,6 +405,9 @@ def main(config_path):
     logger.info(f" Amount of epochs: {n_epochs}")
     logger.info(f" Amount optimization steps: {max_train_steps}")
     logger.info(f" Batch size train: {train_batch_size}, validation: {validation_batch_size}")
+    logger.info(f" Device: {device}")
+    logger.info(f" Mixed Precision: {mixed_precision}")
+    logger.info(f" Gradient Acccumulation Steps: {gradient_accumulation_steps}")
     print("\n")
 
     # Log a few random samples from the training set:
@@ -412,6 +419,10 @@ def main(config_path):
     logging_freq = config["pipeline"]["logging_freq"]
     tracker = BestEpoch()
 
+    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler
+    )
+
     for epoch in range(start_epoch, n_epochs):
         train(
             model,
@@ -422,7 +433,7 @@ def main(config_path):
             metric,
             logging_freq,
             max_train_steps,
-            device,
+            accelerator,
         )
         eval_loss, eval_score = validate(
             model,
