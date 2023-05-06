@@ -23,7 +23,7 @@ def get_dataset(
         dataset_name: str,
         model: str,
         dataset_directory: str = None,
-        max_length: int = 256,
+        max_length: int = 512,
         tokenize: bool = False,
         split: str = None,
         padding: bool = False,
