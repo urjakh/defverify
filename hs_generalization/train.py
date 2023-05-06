@@ -1,7 +1,7 @@
 # Code modified from:
 # https://github.com/huggingface/transformers/blob/master/examples/pytorch/text-classification/run_glue_no_trainer.py
-# Changed structure of the file, removed unnecessary code (e.g. creating new functions and removing non SST-2
-# related code), added comments, and added other necessary code for this research (e.g. incorporating BestEpoch or SWA).
+# Changed structure of the file, removed unnecessary code (e.g. creating new functions and removing irrelevant code),
+# added comments, and added other necessary code for this research.
 # coding=utf-8
 # Copyright 2021 The HuggingFace Inc. team. All rights reserved.
 #
