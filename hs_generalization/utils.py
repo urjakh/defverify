@@ -2,8 +2,10 @@ import json
 from pathlib import Path
 from typing import Callable, Tuple, Dict, Union, Any
 
+import seaborn
 import torch
 from datasets import load_dataset, load_from_disk
+from matplotlib import pyplot as plt
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from transformers import AutoTokenizer
@@ -15,6 +17,10 @@ dataset_to_input_output = {
     "davidson": {
         "input": "tweet",
         "output": "class",
+    },
+    "Paul/hatecheck": {
+        "input": "test_case",
+        "output": "label_gold",
     }
 }
 
@@ -23,7 +29,7 @@ def get_dataset(
         dataset_name: str,
         model: str,
         dataset_directory: str = None,
-        max_length: int = 512,
+        max_length: int = 256,
         tokenize: bool = False,
         split: str = None,
         padding: bool = False,
@@ -74,7 +80,7 @@ def get_dataset(
         )
 
     dataset = dataset.rename_column(dataset_to_input_output[dataset_name]["output"], "labels")
-    cols_to_remove = dataset["train"].column_names
+    cols_to_remove = dataset[list(dataset.keys())[0]].column_names
     cols_to_remove.remove("input_ids")
     cols_to_remove.remove("attention_mask")
     cols_to_remove.remove("labels")
@@ -175,3 +181,11 @@ def load_model(
     scheduler.load_state_dict(scheduler_state_dict)
 
     return model, optimizer, scheduler, epoch
+
+
+def plot_confusion_matrix(functionality: str, cm: np.array):
+    seaborn.heatmap(cm)
+    plt.xlabel("Predicted")
+    plt.ylabel("Reference")
+    plt.title(f"Performance on {functionality}")
+    plt.show()
