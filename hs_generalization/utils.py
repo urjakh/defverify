@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Callable, Tuple, Dict, Union, Any
 
+import numpy as np
 import seaborn
 import torch
 from datasets import load_dataset, load_from_disk
