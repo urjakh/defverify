@@ -33,7 +33,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AdamW, RobertaForSequenceClassification
+from transformers import AdamW, AutoModelForSequenceClassification
 from transformers import set_seed, default_data_collator, DataCollatorWithPadding, get_scheduler
 
 from hs_generalization.utils import get_dataset, load_config, save_model, load_model
@@ -378,7 +378,7 @@ def main(config_path):
     metric = evaluate.combine(["accuracy", "f1", "precision", "recall"])
     # Since evaluate.compute cannot handle extra arguments (e.g. average), override with own function that allows.
     metric.compute = functools.partial(combine_compute, metric)
-    model = RobertaForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
     optimizer = get_optimizer(model, config["optimizer"]["learning_rate"], config["optimizer"]["weight_decay"])
 
     lr_scheduler = get_scheduler(
