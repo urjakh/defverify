@@ -418,8 +418,8 @@ def main(config_path):
     logging_freq = config["pipeline"]["logging_freq"]
     tracker = BestEpoch()
 
-    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, lr_scheduler
+    model, optimizer, train_dataloader, lr_scheduler, validation_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler, validation_dataloader
     )
 
     for epoch in range(start_epoch, n_epochs):

@@ -1,12 +1,16 @@
 import ast
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import List
 
 import click
+import emoji
 import pandas as pd
 from datasets import DatasetDict, load_dataset, Dataset, concatenate_datasets
+
+from hs_generalization.utils import dataset_to_input_output
 
 DATASETS = ["davidson", "founta", "kennedy", "mathew", "talat_hovy", "vidgen"]
 
@@ -29,19 +33,27 @@ class HFDatasetCreator:
 
     def load_data_from_file(self):
         if self.dataset_name == "talat_hovy":
-            file_names = ["neither.json", "racism.json", "sexism.json"]
+            file_names_and_labels = {
+                "neither.json": "neither",
+                "racism.json": "racism",
+                "sexism.json": "sexism"
+            }
 
             datasets = []
-            for file_name in file_names:
+            for file_name, label in file_names_and_labels.items():
                 path = self.dataset_file / Path(file_name)
                 examples = [json.loads(line) for line in open(path, "r")]
+                [example.update({"label": label}) for example in examples]
                 dataset = Dataset.from_list(examples)
-                remove_columns = dataset.features.keys() - ["text", "Annotation"]
+                remove_columns = dataset.features.keys() - ["text", "label"]
                 dataset = dataset.remove_columns(remove_columns)
                 datasets.append(dataset)
             dataset = concatenate_datasets(datasets)
             self.dataset = DatasetDict({"train": dataset})
-
+        elif self.dataset_name == "founta":
+            dataset = pd.read_csv(self.dataset_file, delimiter=r"\s{2,}|\t")
+            dataset = Dataset.from_pandas(dataset)
+            self.dataset = DatasetDict({"train": dataset})
         else:
             suffix = Path(self.dataset_file).suffix[1:]
             self.dataset = load_dataset(suffix, data_files=self.dataset_file)
@@ -117,6 +129,36 @@ class HFDatasetCreator:
         dataset = self.dataset.map(get_most_common_label)
         self.dataset = dataset.map(tokens_to_sentence)
 
+    def clean_data(self, emojis: bool = True, urls: bool = True, usernames: bool = True):
+        def remove_emojis(example):
+            input_key = dataset_to_input_output[self.dataset_name]["input"]
+            example[input_key] = emoji.demojize(example[input_key])
+            return example
+
+        def remove_urls(example):
+            input_key = dataset_to_input_output[self.dataset_name]["input"]
+
+            url_pattern = re.compile(
+                r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+|www\.[^\s]+"
+            )
+            example[input_key] = re.sub(url_pattern, "[URL]", example[input_key])
+
+            return example
+
+        def remove_usernames(example):
+            input_key = dataset_to_input_output[self.dataset_name]["input"]
+
+            username_pattern = re.compile(r'@[A-Za-z0-9_]+')
+            example[input_key] = re.sub(username_pattern, "[USER]", example[input_key])
+            return example
+
+        if emojis:
+            self.dataset = self.dataset.map(remove_emojis)
+        if urls:
+            self.dataset = self.dataset.map(remove_urls)
+        if usernames:
+            self.dataset = self.dataset.map(remove_usernames)
+
 
 @click.command()
 @click.option("-n", "--dataset-name", "dataset_name", required=True, type=str)
@@ -132,32 +174,38 @@ def main(dataset_name: str, path: str, output: str, dataset_split: str):
     if dataset_name == "davidson":
         davidson_creator = HFDatasetCreator(dataset_name, path, dataset_split)
         davidson_creator.load_data_from_file()
+        davidson_creator.clean_data()
         davidson_creator.split_dataset()
         davidson_creator.save_dataset(output)
     elif dataset_name == "founta":
         founta_creator = HFDatasetCreator(dataset_name, path, dataset_split)
         founta_creator.load_data_from_file()
+        founta_creator.clean_data()
         founta_creator.split_dataset()
         founta_creator.save_dataset(output)
     elif dataset_name == "vidgen":
         vidgen_creator = HFDatasetCreator(dataset_name, path, dataset_split)
         vidgen_creator.load_data_from_file()
+        vidgen_creator.clean_data()
         vidgen_creator.split_dataset()
         vidgen_creator.save_dataset(output)
     elif dataset_name == "kennedy":
         kennedy_creator = HFDatasetCreator(dataset_name, "ucberkeley-dlab/measuring-hate-speech", dataset_split)
         kennedy_creator.load_data_from_name()
         kennedy_creator.prepare_kennedy()
+        kennedy_creator.clean_data()
         kennedy_creator.split_dataset()
         kennedy_creator.save_dataset(output)
     elif dataset_name == "mathew":
         mathew_creator = HFDatasetCreator(dataset_name, "hatexplain", dataset_split)
         mathew_creator.load_data_from_name()
         mathew_creator.prepare_mathew()
+        mathew_creator.clean_data()
         mathew_creator.save_dataset(output)
     elif dataset_name == "talat_hovy":
         talat_hovy_creator = HFDatasetCreator(dataset_name, path, dataset_split)
         talat_hovy_creator.load_data_from_file()
+        talat_hovy_creator.clean_data()
         talat_hovy_creator.split_dataset()
         talat_hovy_creator.save_dataset(output)
 

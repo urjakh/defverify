@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Callable, Tuple, Dict, Union, Any
 
 import torch
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset, load_from_disk, ClassLabel
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from transformers import AutoTokenizer
@@ -15,7 +15,27 @@ dataset_to_input_output = {
     "davidson": {
         "input": "tweet",
         "output": "class",
-    }
+    },
+    "talat_hovy": {
+        "input": "text",
+        "output": "label",
+    },
+    "vidgen": {
+        "input": "text",
+        "output": "label",
+    },
+    "mathew": {
+        "input": "sentence",
+        "output": "label",
+    },
+    "kennedy": {
+        "input": "text",
+        "output": "label",
+    },
+    "founta": {
+        "input": "Tweet text",
+        "output": "Label",
+    },
 }
 
 
@@ -79,6 +99,19 @@ def get_dataset(
     cols_to_remove.remove("attention_mask")
     cols_to_remove.remove("labels")
     dataset.remove_columns(cols_to_remove)
+
+    if dataset_name == "talat_hovy":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["sexism", "racism", "neither"]))
+    elif dataset_name == "founta":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "abusive", "normal", "spam"]))
+    elif dataset_name == "kennedy":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
+    elif dataset_name == "mathew":
+        dataset["val"] = dataset["validation"]
+        dataset.pop("validation")
+    elif dataset_name == "vidgen":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
+
     if tokenize:
         dataset.set_format(type='torch', columns=TOKENIZE_COLUMNS)
 
@@ -129,7 +162,7 @@ def save_model(
         folder (str): Path to the folder where the model should be saved.
         model_name (str): Name of the model.
     """
-    filename = Path(folder) / f"{model_name}_{str(epoch)}.pt"
+    filename = Path(folder) / f"{str(epoch)}.pt"
     Path(folder).mkdir(parents=True, exist_ok=True)
 
     checkpoint = {
