@@ -1,6 +1,7 @@
 import json
 import logging
 from collections import defaultdict
+from pathlib import Path
 from typing import Tuple, Any, Dict, Union, List
 
 import click
@@ -14,7 +15,7 @@ from evaluate import EvaluationModule
 from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import set_seed, RobertaForSequenceClassification
+from transformers import set_seed, RobertaForSequenceClassification, AutoModelForSequenceClassification
 
 from hs_generalization.train import get_dataloader
 from hs_generalization.utils import load_config, get_dataset, plot_confusion_matrix
@@ -422,12 +423,14 @@ class HSTypeFilters:
 
 @click.command()
 @click.option("-c", "--config-path", "config_path", required=True, type=str)
-def main(config_path: str):
+@click.option("-p", "--predictions-only", "predictions_only", default=False, type=bool, is_flag=True)
+def main(config_path: str, predictions_only: bool = False):
     """Function that executes the entire training pipeline.
     This function takes care of loading and processing the config file, initializing the model, dataset, optimizer, and
     other utilities for the entire training job.
     Args:
         config_path (str): path to the config file for the training experiment.
+        predictions_only (bool): flag to indicate if only the predictions should be saved and not analyzed further.
     """
     config = load_config(config_path)
     set_seed(config["pipeline"]["seed"])
@@ -441,6 +444,7 @@ def main(config_path: str):
     padding = config["processing"]["padding"]
     hate_speech_label = config["task"]["hate_speech_label"]
     benign_label = config["task"]["benign_label"]
+    predictions_file = config["task"].get("predictions", None)
 
     accelerator = Accelerator(cpu=device == "cpu")
     device = accelerator.device
@@ -465,18 +469,42 @@ def main(config_path: str):
 
     batch_size = config["pipeline"]["batch_size"]
 
-    model = RobertaForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
+    print(model.bert.embeddings.word_embeddings.weight[0][0])
     checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
     model_state_dict = {k.replace("module.", ""): v for (k, v) in checkpoint["model"].items()}
     model.load_state_dict(model_state_dict, strict=False)
     metric = evaluate.load("accuracy")
+    print(model.bert.embeddings.word_embeddings.weight[0][0])
 
     logger.info(f" Device used: {device}.")
     logger.info(" Starting evaluating model on the data.")
 
-    dataloader = get_dataloader(dataset, tokenizer, batch_size, padding)
-    model, dataloader = accelerator.prepare(model, dataloader)
-    results, predictions, references = evaluate_data(model, dataloader, metric, device)
+    if not predictions_file:
+        dataloader = get_dataloader(dataset, tokenizer, batch_size, padding)
+        model, dataloader = accelerator.prepare(model, dataloader)
+        results, predictions, references = evaluate_data(model, dataloader, metric, device)
+    else:
+        with open(predictions_file, "r") as f:
+            content = json.load(f)
+        results = content["results"]
+        predictions = content["predictions"]
+        references = content["references"]
+
+    if predictions_only:
+        info_to_save = {
+            "results": results,
+            "predictions": predictions.int().tolist(),
+            "references": references.int().tolist(),
+        }
+
+        p = Path(config["pipeline"]["output_path"])
+        p.mkdir(exist_ok=True, parents=True)
+
+        with open(config["pipeline"]["output_path"], "w") as f:
+            json.dump(info_to_save, f, indent=2)
+
+        quit()
 
     logger.info(f"Overall Loss: {results['loss']}, Overall Accuracy: {results['accuracy']}")
     plot_confusion_matrix("Overall HateCheck", results['confusion_matrix'])
@@ -492,6 +520,9 @@ def main(config_path: str):
         "references": references.int().tolist(),
     }
     filter_evaluator.evaluate(dataset)
+
+    p = Path(config["pipeline"]["output_path"])
+    p.mkdir(exist_ok=True)
 
     with open(config["pipeline"]["output_path"], "w") as f:
         json.dump(filter_evaluator.results, f, indent=2)

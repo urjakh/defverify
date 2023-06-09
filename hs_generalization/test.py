@@ -1,6 +1,7 @@
 import functools
 import json
 import logging
+from pathlib import Path
 from typing import Tuple, Any, Dict
 
 import click
@@ -12,7 +13,7 @@ from datasets import Metric
 from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import set_seed, RobertaForSequenceClassification
+from transformers import set_seed, AutoModelForSequenceClassification
 
 from hs_generalization.train import get_dataloader, combine_compute
 from hs_generalization.utils import load_config, get_dataset
@@ -105,17 +106,16 @@ def main(config_path: str):
         return_tokenizer=True,
         dataset_directory=dataset_directory,
     )
-    dataset = dataset["val"]
+    dataset = dataset["test"]
     batch_size = config["pipeline"]["batch_size"]
     dataloader = get_dataloader(dataset, tokenizer, batch_size, padding)
 
     # Load metric, model, optimizer, and learning rate scheduler.
     metric = evaluate.combine(["accuracy", "f1", "precision", "recall"])
     metric.compute = functools.partial(combine_compute, metric)
-    model = RobertaForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
     checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
-    model_state_dict = {k.replace("module.", ""): v for (k, v) in checkpoint["model"].items()}
-    model.load_state_dict(model_state_dict, strict=False)
+    model.load_state_dict(checkpoint["model"])
 
     logger.info(f" Device: {device}.")
     logger.info(" Starting evaluating model on the data.")
@@ -123,8 +123,16 @@ def main(config_path: str):
     logger.info(f" Average Loss: {eval_loss}, Average Accuracy: {eval_accuracy}")
 
     if "output_predictions" in config["pipeline"]:
+        p = Path(config["pipeline"]["output_predictions"]).parent
+        p.mkdir(exist_ok=True, parents=True)
+
         with open(config["pipeline"]["output_predictions"], "w") as f:
-            save_dict = {"confusion_matrix": cm.tolist(), "predictions": predictions}
+            save_dict = {
+                "confusion_matrix": cm.tolist(),
+                "predictions": predictions,
+                "average_loss": float(eval_loss),
+                "results": eval_accuracy
+            }
             json.dump(save_dict, f)
 
 
