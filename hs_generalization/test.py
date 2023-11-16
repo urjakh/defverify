@@ -8,6 +8,7 @@ import click
 import evaluate
 import numpy as np
 import torch
+import wandb
 from accelerate import Accelerator
 from datasets import Metric
 from sklearn.metrics import confusion_matrix
@@ -27,7 +28,7 @@ def evaluate_data(
         dataloader: DataLoader,
         metric: Metric,
         device: str,
-) -> Tuple[np.float_, Dict, list, Any]:
+) -> Tuple[np.float_, Dict, Any, Any, Any, Any]:
     """Function for running model on evaluation or test set.
     In this function, the model loaded from checkpoint is applied on the evaluation or test set from a dataloader.
     Loss and accuracy are tracked as well.
@@ -44,10 +45,10 @@ def evaluate_data(
 
     predictions = torch.tensor([])
     references = torch.tensor([])
+    confidences = torch.tensor([])
 
     with torch.no_grad():
         losses = []
-        all_predictions = []
         for step, batch in enumerate(tqdm(dataloader)):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -57,9 +58,9 @@ def evaluate_data(
 
             predictions = torch.cat([predictions, outputs.logits.argmax(dim=-1).to("cpu")])
             references = torch.cat([references, batch["labels"].to("cpu")])
+            confidences = torch.cat([confidences, outputs.logits.softmax(dim=-1).to("cpu")])
 
             losses.append(outputs.loss.detach().cpu().numpy())
-            all_predictions.extend(predictions.tolist())
 
     eval_loss = np.mean(losses)
     score_micro = metric.compute(predictions=predictions, references=references, average="micro")
@@ -69,7 +70,7 @@ def evaluate_data(
     metrics = metrics_micro | metrics_macro
 
     cm = confusion_matrix(references, predictions)
-    return eval_loss, metrics, all_predictions, cm
+    return eval_loss, metrics, predictions.int().tolist(), cm, confidences.tolist(), references.int().tolist()
 
 
 @click.command()
@@ -84,6 +85,8 @@ def main(config_path: str):
     config = load_config(config_path)
     set_seed(config["pipeline"]["seed"])
     torch.backends.cudnn.deterministic = True
+
+    wandb.init(config=config, project=config["wandb"]["project_name"], name=config["wandb"]["run_name"])
 
     accelerator = Accelerator()
     device = accelerator.device
@@ -116,24 +119,30 @@ def main(config_path: str):
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=config["task"]["num_labels"])
     checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
     model.load_state_dict(checkpoint["model"])
+    model.to(device)
 
     logger.info(f" Device: {device}.")
     logger.info(" Starting evaluating model on the data.")
-    eval_loss, eval_accuracy, predictions, cm = evaluate_data(model, dataloader, metric, device)
+    eval_loss, eval_accuracy, predictions, cm, confidences, references = evaluate_data(model, dataloader, metric, device)
     logger.info(f" Average Loss: {eval_loss}, Average Accuracy: {eval_accuracy}")
+
+    save_dict = {
+        "confusion_matrix": cm.tolist(),
+        "predictions": predictions,
+        "average_loss": float(eval_loss),
+        "results": eval_accuracy,
+        "confidences": confidences,
+        "references": references,
+    }
 
     if "output_predictions" in config["pipeline"]:
         p = Path(config["pipeline"]["output_predictions"]).parent
         p.mkdir(exist_ok=True, parents=True)
 
         with open(config["pipeline"]["output_predictions"], "w") as f:
-            save_dict = {
-                "confusion_matrix": cm.tolist(),
-                "predictions": predictions,
-                "average_loss": float(eval_loss),
-                "results": eval_accuracy
-            }
             json.dump(save_dict, f)
+
+    wandb.log(save_dict)
 
 
 if __name__ == "__main__":
