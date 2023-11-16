@@ -5,7 +5,7 @@ from typing import Callable, Tuple, Dict, Union, Any
 import numpy as np
 import seaborn
 import torch
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset, load_from_disk, ClassLabel
 from matplotlib import pyplot as plt
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
@@ -19,10 +19,30 @@ dataset_to_input_output = {
         "input": "tweet",
         "output": "class",
     },
+    "talat_hovy": {
+        "input": "text",
+        "output": "label",
+    },
+    "vidgen": {
+        "input": "text",
+        "output": "label",
+    },
+    "mathew": {
+        "input": "sentence",
+        "output": "label",
+    },
+    "kennedy": {
+        "input": "text",
+        "output": "label",
+    },
+    "founta": {
+        "input": "Tweet text",
+        "output": "Label",
+    },
     "Paul/hatecheck": {
-        "input": "test_case",
-        "output": "label_gold",
-    }
+            "input": "test_case",
+            "output": "label_gold",
+        }
 }
 
 
@@ -86,6 +106,19 @@ def get_dataset(
     cols_to_remove.remove("attention_mask")
     cols_to_remove.remove("labels")
     dataset.remove_columns(cols_to_remove)
+
+    if dataset_name == "talat_hovy":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["sexism", "racism", "neither"]))
+    elif dataset_name == "founta":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "abusive", "normal", "spam"]))
+    elif dataset_name == "kennedy":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
+    elif dataset_name == "mathew":
+        dataset["val"] = dataset["validation"]
+        dataset.pop("validation")
+    elif dataset_name == "vidgen":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
+
     if tokenize:
         dataset.set_format(type='torch', columns=TOKENIZE_COLUMNS)
 
