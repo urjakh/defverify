@@ -92,7 +92,7 @@ def get_dataset(
     if tokenize:
         dataset = dataset.map(
             lambda x: tokenizer(
-                x[input_name],
+                x[input_name].lower(),
                 padding=padding,
                 truncation=True,
                 max_length=max_length,
@@ -110,7 +110,10 @@ def get_dataset(
     if dataset_name == "talat_hovy":
         dataset = dataset.cast_column("labels", ClassLabel(names=["sexism", "racism", "neither"]))
     elif dataset_name == "founta":
-        dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "abusive", "normal", "spam"]))
+        if "binary" in dataset_directory:
+            dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "normal"]))
+        else:
+            dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "abusive", "normal", "spam"]))
     elif dataset_name == "kennedy":
         dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
     elif dataset_name == "mathew":
