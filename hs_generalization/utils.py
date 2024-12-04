@@ -2,8 +2,11 @@ import json
 from pathlib import Path
 from typing import Callable, Tuple, Dict, Union, Any
 
+import numpy as np
+import seaborn
 import torch
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset, load_from_disk, ClassLabel
+from matplotlib import pyplot as plt
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from transformers import AutoTokenizer
@@ -15,7 +18,31 @@ dataset_to_input_output = {
     "davidson": {
         "input": "tweet",
         "output": "class",
-    }
+    },
+    "talat_hovy": {
+        "input": "text",
+        "output": "label",
+    },
+    "vidgen": {
+        "input": "text",
+        "output": "label",
+    },
+    "mathew": {
+        "input": "sentence",
+        "output": "label",
+    },
+    "kennedy": {
+        "input": "text",
+        "output": "label",
+    },
+    "founta": {
+        "input": "Tweet text",
+        "output": "Label",
+    },
+    "Paul/hatecheck": {
+            "input": "test_case",
+            "output": "label_gold",
+        }
 }
 
 
@@ -65,7 +92,7 @@ def get_dataset(
     if tokenize:
         dataset = dataset.map(
             lambda x: tokenizer(
-                x[input_name],
+                x[input_name].lower(),
                 padding=padding,
                 truncation=True,
                 max_length=max_length,
@@ -74,11 +101,27 @@ def get_dataset(
         )
 
     dataset = dataset.rename_column(dataset_to_input_output[dataset_name]["output"], "labels")
-    cols_to_remove = dataset["train"].column_names
+    cols_to_remove = dataset[list(dataset.keys())[0]].column_names
     cols_to_remove.remove("input_ids")
     cols_to_remove.remove("attention_mask")
     cols_to_remove.remove("labels")
     dataset.remove_columns(cols_to_remove)
+
+    if dataset_name == "talat_hovy":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["sexism", "racism", "neither"]))
+    elif dataset_name == "founta":
+        if "binary" in dataset_directory:
+            dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "normal"]))
+        else:
+            dataset = dataset.cast_column("labels", ClassLabel(names=["hateful", "abusive", "normal", "spam"]))
+    elif dataset_name == "kennedy":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
+    elif dataset_name == "mathew":
+        dataset["val"] = dataset["validation"]
+        dataset.pop("validation")
+    elif dataset_name == "vidgen":
+        dataset = dataset.cast_column("labels", ClassLabel(names=["hate", "nothate"]))
+
     if tokenize:
         dataset.set_format(type='torch', columns=TOKENIZE_COLUMNS)
 
@@ -175,3 +218,11 @@ def load_model(
     scheduler.load_state_dict(scheduler_state_dict)
 
     return model, optimizer, scheduler, epoch
+
+
+def plot_confusion_matrix(functionality: str, cm: np.array):
+    seaborn.heatmap(cm)
+    plt.xlabel("Predicted")
+    plt.ylabel("Reference")
+    plt.title(f"Performance on {functionality}")
+    plt.show()
