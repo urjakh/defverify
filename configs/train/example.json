@@ -1,0 +1,29 @@
+{
+  "pipeline": {
+    "seed": 0,
+    "output_directory": "outputs/DATASET/MODEL/SEED",
+    "train_batch_size": 8,
+    "validation_batch_size": 16,
+    "n_epochs": 8,
+    "logging_freq": 100
+  },
+  "task": {
+    "model_name": "MODEL NAME FROM HUGGINGFACE",
+    "dataset_name": "DATASET NAME",
+    "dataset_directory": "PATH TO DATASET SAVED IN HUGGINGFACE FORMAT",
+    "num_labels": 3
+  },
+  "optimizer": {
+    "learning_rate": 0.00005,
+    "learning_rate_scheduler": "linear",
+    "weight_decay": 0.00,
+    "num_warmup_steps": 247
+  },
+  "processing": {
+    "padding": false
+  },
+  "wandb": {
+    "project_name": "hs-generalization",
+    "run_name": "DATASET-MODEL-SEED"
+  }
+}

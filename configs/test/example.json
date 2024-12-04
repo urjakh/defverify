@@ -1,0 +1,22 @@
+{
+  "pipeline": {
+    "seed": 0,
+    "batch_size": 16,
+    "logging_freq": 100,
+    "output_predictions": "results/test/DATASET/MODEL/SEED.json"
+  },
+  "task": {
+    "model_name": "MODEL NAME FROM HUGGINGFACE",
+    "dataset_name": "DATASET NAME",
+    "dataset_directory": "PATH TO DATASET SAVED IN HUGGINGFACE FORMAT",
+    "num_labels": 3,
+    "checkpoint": "outputs/DATASET/SEED/CHECKPOINT.pt"
+  },
+  "processing": {
+    "padding": false
+  },
+  "wandb": {
+    "project_name": "hs-generalization-test",
+    "run_name": "DATASET-MODEL-SEED"
+  }
+}

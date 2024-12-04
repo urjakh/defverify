@@ -1,0 +1,23 @@
+{
+  "pipeline": {
+    "seed": 0,
+    "batch_size": 16,
+    "logging_freq": 100
+  },
+  "task": {
+    "model_name": "MODEL NAME FROM HUGGINGFACE",
+    "dataset_name": "DATASET NAME",
+    "dataset_directory": "PATH TO DATASET SAVED IN HUGGINGFACE FORMAT",
+    "num_labels": 3,
+    "checkpoint": "outputs/DATASET/SEED/CHECKPOINT.pt",
+    "model_hate_label": 0,
+    "data_hate_label": 0
+  },
+  "processing": {
+    "padding": false
+  },
+  "wandb": {
+    "project_name": "hs-generalization-cross-eval",
+    "run_name": "CHECKPOINTDATASET-DATASET-SEED-MODEL"
+  }
+}
