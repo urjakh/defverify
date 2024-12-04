@@ -1,4 +1,4 @@
-# robustness-albert
+# hs-generalization
 
 This is the code for ["DefVerify: Do Hate Speech Models Reflect Their Dataset's Definition?"](https://arxiv.org/abs/2410.15911), accepted to COLING 2025.
 
